@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: collect-metrics
+spec:
+  schedule: "*/5 * * * *" # Runs every 5 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: metrics-collector
+              image: curlimages/curl:latest
+              securityContext:
+                runAsUser: 0 # Run as root user
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  TIMESTAMP=$(date +'%Y%m%d%H%M%S');
+                  METRICS=$(curl -s http://node-exporter.monitoring:9100/metrics);
+                  if [ -z "$METRICS" ]; then
+                    echo "Error: No metrics received" > "/data/metrics_${TIMESTAMP}.txt";
+                  else
+                    echo "$METRICS" > "/data/metrics_${TIMESTAMP}.txt";
+                  fi
+                  echo "Metrics collected and written to /data/metrics_${TIMESTAMP}.txt";
+              volumeMounts:
+                - name: metrics-storage
+                  mountPath: /data
+          volumes:
+            - name: metrics-storage
+              persistentVolumeClaim:
+                claimName: metrics-pvc
+          restartPolicy: OnFailure
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: metrics-pv
+spec:
+  storageClassName: standard
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /data/metrics
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: metrics-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: metrics-pv  # This explicitly links the PVC to the PV
